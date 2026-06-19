@@ -6,7 +6,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('ui/logo.png', 'ui')],
     hiddenimports=['PySide6.QtWidgets', 'PySide6.QtGui', 'PySide6.QtCore'],
     hookspath=[],
     hooksconfig={},

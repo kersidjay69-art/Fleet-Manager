@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-WINDOW_MIN_WIDTH = 680
+WINDOW_MIN_WIDTH = 476
 WINDOW_MIN_HEIGHT = 600
 
 
@@ -63,7 +63,7 @@ def restore_window_geometry(window) -> None:
 
     x = _cfg.get("window_x")
     y = _cfg.get("window_y")
-    w = max(_cfg.get("window_width", 820), WINDOW_MIN_WIDTH)
+    w = max(_cfg.get("window_width", 574), WINDOW_MIN_WIDTH)
     h = max(_cfg.get("window_height", 760), WINDOW_MIN_HEIGHT)
 
     if x is not None and y is not None:

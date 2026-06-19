@@ -52,9 +52,9 @@ unit tests in `tests/test_distribution.py`.
 ## Tech & data
 
 - **Stack:** Python + PySide6 (Qt Widgets), packaged with PyInstaller.
-- **Fleet data is in-memory only** — the pilot list is never written to disk and resets
-  when the app closes. Only window settings are persisted, to `fleet_config.json` next
-  to the executable.
+- **Fleet composition is cached** — the pilot list (names, max windows, in-fleet count and
+  sponge) is saved to `fleet_config.json` on every change and restored on the next launch,
+  so the fleet survives an accidental close. Window/theme settings live in the same file.
 - Fully offline — no ESI / network calls.
 
 ## Run from source

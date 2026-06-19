@@ -28,11 +28,11 @@ PRIMARY_BG_HOVER = "#1a5070"
 
 # ── Темы (фракции EVE) ────────────────────────────────────────────────────────
 THEME_PRESETS = [
-    {"id": "default",  "name": "По умолчанию",          "accent": "#4fc3f7", "accent2": "#00bcd4"},
-    {"id": "amarr",    "name": "Амаррская Империя",      "accent": "#e0b347", "accent2": "#caa030"},
-    {"id": "gallente", "name": "Галлентская Федерация",  "accent": "#34c79a", "accent2": "#26a37d"},
-    {"id": "caldari",  "name": "Государство Калдари",     "accent": "#5b9bd5", "accent2": "#3f7fc0"},
-    {"id": "minmatar", "name": "Республика Минматар",     "accent": "#d4623a", "accent2": "#b54a28"},
+    {"id": "default",  "name": "Default",             "accent": "#4fc3f7", "accent2": "#00bcd4"},
+    {"id": "amarr",    "name": "Amarr Empire",        "accent": "#e0b347", "accent2": "#caa030"},
+    {"id": "gallente", "name": "Gallente Federation", "accent": "#34c79a", "accent2": "#26a37d"},
+    {"id": "caldari",  "name": "Caldari State",       "accent": "#5b9bd5", "accent2": "#3f7fc0"},
+    {"id": "minmatar", "name": "Minmatar Republic",   "accent": "#d4623a", "accent2": "#b54a28"},
 ]
 THEMES = {p["id"]: p for p in THEME_PRESETS}
 
@@ -137,11 +137,29 @@ QPushButton#seg:checked {{
 QPushButton#del {{
     background: transparent;
     border: none;
-    color: {TEXT_DIM};
+    color: {RED};
     font-size: 14px;
+    font-weight: bold;
     padding: 0 6px;
 }}
-QPushButton#del:hover {{ color: {RED}; }}
+QPushButton#del:hover {{ color: #ff7b78; }}
+
+QPushButton#stepMinus, QPushButton#stepPlus {{
+    background: {BG_PANEL};
+    border-radius: 3px;
+    padding: 0;
+    margin: 0;
+    font-size: 15px;
+    font-weight: bold;
+    text-align: center;
+}}
+QPushButton#stepMinus {{ color: {RED};   border: 1px solid {RED}; }}
+QPushButton#stepPlus  {{ color: {GREEN}; border: 1px solid {GREEN}; }}
+QPushButton#stepMinus:hover {{ background: rgba(239, 83, 80, 0.18); }}
+QPushButton#stepPlus:hover  {{ background: rgba(76, 175, 80, 0.18); }}
+QPushButton#stepMinus:disabled, QPushButton#stepPlus:disabled {{
+    color: {BORDER}; border: 1px solid {BORDER}; background: {BG_DEEP};
+}}
 
 QLineEdit, QSpinBox {{
     background: {BG_DEEP};
@@ -167,7 +185,6 @@ QTableWidget::item:selected {{ background: {SELECT_BG}; color: {ACCENT}; }}
 
 QHeaderView::section {{
     background: {BG_HEADER};
-    color: {TEXT_DIM};
     border: none;
     border-bottom: 1px solid {BORDER};
     padding: 6px 8px;
