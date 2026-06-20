@@ -133,14 +133,21 @@ class SnakeFleetBar(QWidget):
 
     def _crawl(self):
         edge = self._fill_edge()
+        if edge <= 0:                           # флот пуст — змеи нет вовсе
+            self._snake.setMask(QRegion())
+            return
         self._x += 2.4
         if self._x > edge:                      # дошла до края заливки — заново слева
             self._x = float(-self.SNAKE_W)
         y = (self.height() - self.SNAKE_H) // 2
-        self._snake.move(int(self._x), y)
-        # Показываем только ту часть змеи, что в пределах зелёной заливки.
-        visible = max(0, min(self.SNAKE_W, edge - int(self._x)))
-        self._snake.setMask(QRegion(0, 0, visible, self.SNAKE_H))
+        xi = int(self._x)
+        self._snake.move(xi, y)
+        # Маска в координатах метки: показываем только часть змеи в пределах
+        # зелёной заливки на ЭКРАНЕ, т.е. screen ∈ [0, edge].
+        local_start = max(0, -xi)
+        local_end = min(self.SNAKE_W, edge - xi)
+        width = max(0, local_end - local_start)
+        self._snake.setMask(QRegion(local_start, 0, width, self.SNAKE_H))
 
     def paintEvent(self, _event):
         p = QPainter(self)
