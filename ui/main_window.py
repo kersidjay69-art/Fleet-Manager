@@ -133,21 +133,25 @@ class SnakeFleetBar(QWidget):
 
     def _crawl(self):
         edge = self._fill_edge()
-        if edge <= 0:                           # флот пуст — змеи нет вовсе
-            self._snake.setMask(QRegion())
-            return
-        self._x += 2.4
-        if self._x > edge:                      # дошла до края заливки — заново слева
-            self._x = float(-self.SNAKE_W)
-        y = (self.height() - self.SNAKE_H) // 2
+        if edge > 0:
+            self._x += 2.4
+            if self._x > edge:                  # дошла до края заливки — заново слева
+                self._x = float(-self.SNAKE_W)
         xi = int(self._x)
-        self._snake.move(xi, y)
-        # Маска в координатах метки: показываем только часть змеи в пределах
-        # зелёной заливки на ЭКРАНЕ, т.е. screen ∈ [0, edge].
+        # Видимая часть змеи на ЭКРАНЕ ограничена зелёной заливкой: screen ∈ [0, edge].
         local_start = max(0, -xi)
         local_end = min(self.SNAKE_W, edge - xi)
-        width = max(0, local_end - local_start)
+        width = local_end - local_start
+        # Пустой регион Qt трактует как «снять маску» (показать всё) — поэтому когда
+        # показывать нечего (флот пуст / змея вне заливки), прячем метку целиком.
+        if edge <= 0 or width <= 0:
+            self._snake.hide()
+            return
+        y = (self.height() - self.SNAKE_H) // 2
+        self._snake.move(xi, y)
         self._snake.setMask(QRegion(local_start, 0, width, self.SNAKE_H))
+        if not self._snake.isVisible():
+            self._snake.show()
 
     def paintEvent(self, _event):
         p = QPainter(self)
