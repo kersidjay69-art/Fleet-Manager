@@ -20,6 +20,7 @@ GREEN     = "#4caf50"
 ORANGE    = "#ff9800"
 RED       = "#ef5350"
 AMBER     = "#e0a526"
+PURPLE    = "#b388ff"
 # производные от акцента (задаются apply_theme)
 SELECT_BG        = "#1a3550"
 PRIMARY_BG       = "#0d3a5a"
@@ -33,6 +34,7 @@ THEME_PRESETS = [
     {"id": "gallente", "name": "Gallente Federation", "accent": "#34c79a", "accent2": "#26a37d"},
     {"id": "caldari",  "name": "Caldari State",       "accent": "#5b9bd5", "accent2": "#3f7fc0"},
     {"id": "minmatar", "name": "Minmatar Republic",   "accent": "#d4623a", "accent2": "#b54a28"},
+    {"id": "uroborus", "name": "Uroborus",            "accent": "#9fb255", "accent2": "#7f9043"},
 ]
 THEMES = {p["id"]: p for p in THEME_PRESETS}
 
@@ -143,6 +145,18 @@ QPushButton#del {{
     padding: 0 6px;
 }}
 QPushButton#del:hover {{ color: #ff7b78; }}
+
+/* Красная кнопка-действие (Clear) — цвет фиксированный, не зависит от темы. */
+QPushButton#danger {{
+    background: {BG_PANEL};
+    color: {RED};
+    border: 1px solid {RED};
+    border-radius: 3px;
+    padding: 4px 10px;
+    font-size: 11px;
+}}
+QPushButton#danger:hover {{ background: rgba(239, 83, 80, 0.18); }}
+QPushButton#danger:pressed {{ background: rgba(239, 83, 80, 0.30); }}
 
 QPushButton#stepMinus, QPushButton#stepPlus {{
     background: {BG_PANEL};

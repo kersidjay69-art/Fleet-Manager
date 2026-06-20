@@ -4,14 +4,17 @@ import sys
 import time
 import uuid
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QLineEdit, QPushButton, QButtonGroup, QComboBox,
-    QCheckBox, QProgressBar, QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QSizePolicy, QMessageBox, QApplication,
+    QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QSizePolicy, QMessageBox, QApplication, QStyledItemDelegate,
 )
-from PySide6.QtGui import QColor, QIntValidator, QPixmap
+from PySide6.QtGui import (
+    QColor, QIntValidator, QPixmap, QPen, QFont, QFontMetrics, QMovie, QRegion, QPainter,
+    QDesktopServices,
+)
 
 from collections import Counter
 
@@ -21,12 +24,154 @@ from core.distribution import Member, compute_distribution, FLEET_LIMIT
 from core.sorting import sort_members
 
 
+ZKILL_URL = "https://zkillboard.com/character/2124139671/"
+
+
 def _resource(name: str) -> str:
     """Путь к ресурсу рядом с этим модулем (или в распакованном PyInstaller-бандле)."""
     base = getattr(sys, "_MEIPASS", None)
     if base:
         return os.path.join(base, "ui", name)
     return os.path.join(os.path.dirname(__file__), name)
+
+
+class _ClickableLabel(QLabel):
+    """QLabel, открывающий ссылку по клику (для логотипа)."""
+
+    def __init__(self, url: str, parent=None):
+        super().__init__(parent)
+        self._url = url
+        self.setCursor(Qt.PointingHandCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            QDesktopServices.openUrl(QUrl(self._url))
+        super().mousePressEvent(event)
+
+
+class _HeaderRuleDelegate(QStyledItemDelegate):
+    """Рисует горизонтальную разделительную полосу под строкой-итогом (row 0)."""
+
+    def __init__(self, color: str, parent=None):
+        super().__init__(parent)
+        self._color = QColor(color)
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if index.row() == 0:
+            painter.save()
+            pen = QPen(self._color)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            y = option.rect.bottom()
+            painter.drawLine(option.rect.left(), y, option.rect.right(), y)
+            painter.restore()
+
+
+class SnakeFleetBar(QWidget):
+    """Полоска флота. В обычных темах — простой прогресс-бар; в теме Uroborus
+    по зелёной заливке слева направо ползёт анимированная змея (GIF)."""
+
+    SNAKE_W, SNAKE_H = 104, 18
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._max = 60
+        self._value = 0
+        self._over = False
+        self._fill = styles.ACCENT
+        self._snake_on = False
+        self._x = float(-self.SNAKE_W)
+        self.setMinimumHeight(self.SNAKE_H)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+        self._movie = QMovie(_resource("snake.gif"))
+        self._movie.setCacheMode(QMovie.CacheAll)
+        self._snake = QLabel(self)
+        self._snake.setMovie(self._movie)
+        self._snake.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._snake.setStyleSheet("background: transparent;")
+        self._snake.resize(self.SNAKE_W, self.SNAKE_H)
+        self._snake.hide()
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._crawl)
+
+    # ── API в духе QProgressBar ──────────────────────────────────────────────
+    def setRange(self, _lo, hi):
+        self._max = max(1, int(hi))
+        self.update()
+
+    def setValue(self, v):
+        self._value = max(0, min(int(v), self._max))
+        self.update()
+
+    def set_over(self, over: bool):
+        self._over = bool(over)
+        self.update()
+
+    def set_fill(self, color: str):
+        self._fill = color
+        self.update()
+
+    def set_snake(self, on: bool):
+        self._snake_on = bool(on)
+        if on:
+            self._x = float(-self.SNAKE_W)
+            self._snake.show()
+            self._movie.start()
+            self._timer.start(40)
+        else:
+            self._timer.stop()
+            self._movie.stop()
+            self._snake.hide()
+        self.update()
+
+    # ── внутреннее ────────────────────────────────────────────────────────────
+    def _fill_edge(self) -> int:
+        return int(self._value / self._max * self.width()) if self._max else 0
+
+    def _crawl(self):
+        edge = self._fill_edge()
+        self._x += 2.4
+        if self._x > edge:                      # дошла до края заливки — заново слева
+            self._x = float(-self.SNAKE_W)
+        y = (self.height() - self.SNAKE_H) // 2
+        self._snake.move(int(self._x), y)
+        # Показываем только ту часть змеи, что в пределах зелёной заливки.
+        visible = max(0, min(self.SNAKE_W, edge - int(self._x)))
+        self._snake.setMask(QRegion(0, 0, visible, self.SNAKE_H))
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        edge = self._fill_edge()
+        fill_col = QColor(styles.RED if self._over else self._fill)
+
+        if self._snake_on:
+            # Тёмная труба во всю высоту + тонкая полоса-прогресс; сверху ползёт змея.
+            p.setPen(QPen(QColor(styles.BORDER), 1))
+            p.setBrush(QColor(styles.BG_DEEP))
+            p.drawRoundedRect(0.5, 0.5, w - 1, h - 1, 4, 4)
+            line_h = 5.0
+            ly = (h - line_h) / 2.0
+            if edge > 1:
+                p.setPen(Qt.NoPen)
+                p.setBrush(fill_col)
+                p.drawRoundedRect(0, ly, edge, line_h, line_h / 2, line_h / 2)
+        else:
+            # Обычный тонкий прогресс-бар.
+            band = 8.0
+            y = (h - band) / 2.0
+            r = band / 2.0
+            p.setPen(QPen(QColor(styles.BORDER), 1))
+            p.setBrush(QColor(styles.BG_DEEP))
+            p.drawRoundedRect(0.5, y + 0.5, w - 1, band - 1, r, r)
+            if edge > 1:
+                p.setPen(Qt.NoPen)
+                p.setBrush(fill_col)
+                p.drawRoundedRect(0, y, edge, band, r, r)
 
 
 class MainWindow(QMainWindow):
@@ -68,7 +213,8 @@ class MainWindow(QMainWindow):
         bar.setObjectName("header_bar")
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(14, 6, 14, 6)
-        logo = QLabel()
+        logo = _ClickableLabel(ZKILL_URL)
+        logo.setToolTip("Open on zKillboard")
         pix = QPixmap(_resource("logo.png"))
         if not pix.isNull():
             logo.setPixmap(pix.scaledToHeight(28, Qt.SmoothTransformation))
@@ -78,7 +224,7 @@ class MainWindow(QMainWindow):
         self._brand.setObjectName("title")
         self._brand.setOpenExternalLinks(True)
         self._brand.setCursor(Qt.PointingHandCursor)
-        self._brand.setToolTip("Open Invasion Force on zKillboard")
+        self._brand.setToolTip("Open on zKillboard")
         self._set_brand_html()
 
         self._theme_combo = QComboBox()
@@ -106,7 +252,7 @@ class MainWindow(QMainWindow):
     def _set_brand_html(self):
         """Бренд-ссылка с цветом текущей темы (accent)."""
         self._brand.setText(
-            '<a href="https://zkillboard.com/corporation/98486100/" '
+            f'<a href="{ZKILL_URL}" '
             f'style="color:{styles.ACCENT}; text-decoration:none;">Invasion Force</a>'
         )
 
@@ -124,10 +270,10 @@ class MainWindow(QMainWindow):
         self._slash = QLabel(f"/ {self._fleet_limit}")
         self._slash.setStyleSheet(f"color:{styles.TEXT_DIM}; font-size:16px;")
 
-        self._bar = QProgressBar()
+        self._bar = SnakeFleetBar()
         self._bar.setRange(0, self._fleet_limit)
-        self._bar.setTextVisible(False)
-        self._bar.setFixedHeight(8)
+        self._bar.set_fill(styles.ACCENT)
+        self._bar.set_snake(config.get("theme", "default") == "uroborus")
 
         # Размер флота: 40 / 60 / 120 окон.
         self._size_combo = QComboBox()
@@ -174,11 +320,11 @@ class MainWindow(QMainWindow):
         self._inp_max.setAlignment(Qt.AlignCenter)
         self._inp_max.returnPressed.connect(self._on_add)
 
-        # Кнопка ADD по ширине поля ввода имени.
+        # Кнопка ADD — компактная (половина прежней ширины).
         btn = QPushButton("ADD")
         btn.setObjectName("primary")
         btn.clicked.connect(self._on_add)
-        btn.setFixedWidth(156)
+        btn.setFixedWidth(78)
         btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
         lay.addWidget(self._inp_name)
@@ -224,13 +370,20 @@ class MainWindow(QMainWindow):
         lay.addSpacing(10)
         lay.addWidget(self._btn_check)
 
+        # CHECK очищает весь список флота (с подтверждением).
+        self._btn_clear = QPushButton("Clear")
+        self._btn_clear.setObjectName("danger")
+        self._btn_clear.setToolTip("Remove all pilots from the fleet")
+        self._btn_clear.clicked.connect(self._on_clear)
+        lay.addWidget(self._btn_clear)
+
         lay.addStretch(1)
         return lay
 
     def _build_table(self) -> QWidget:
         self._table = QTableWidget(0, 7)
         self._table.setHorizontalHeaderLabels(
-            ["Character", "Max", "In Fleet", "Sponge", "UP/DOWN", "✓", ""]
+            ["Character", "Max", "Fleet", "Sponge", "UP/DOWN", "✓", ""]
         )
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -240,23 +393,39 @@ class MainWindow(QMainWindow):
 
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        # In Fleet / ✓ — по содержимому.
-        for col in (2, 5):
-            hh.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        # Степперы Max/Sponge и UP/DOWN — cell-виджеты, поэтому фиксированная ширина
-        # (ResizeToContents их не учитывает и обрезает содержимое).
-        for col, wdt in ((1, 100), (3, 100), (4, 96)):
+        # ✓ — по содержимому.
+        hh.setSectionResizeMode(5, QHeaderView.ResizeToContents)
+        # Степперы Max/Sponge — фиксированная ширина под кнопки. In Fleet и UP/DOWN
+        # сужаем РОВНО до их заголовков: ширину текста меряем реальным шрифтом
+        # заголовка (Segoe UI 11px bold) в рантайме, так что на любой машине текст
+        # «UP/DOWN» не режется, а лишнего места в «In Fleet» не остаётся.
+        hfont = QFont("Segoe UI")
+        hfont.setPixelSize(11)
+        hfont.setBold(True)
+        hfm = QFontMetrics(hfont)
+        # Max/Sponge: ширина под степпер [−] число [+] (≈82px) + небольшой запас,
+        # чтобы кнопки не обрезались. In Fleet/UP-DOWN — ровно по их заголовкам.
+        widths = {
+            1: 88,
+            2: hfm.horizontalAdvance("Fleet") + 18,
+            3: 88,
+            4: hfm.horizontalAdvance("UP/DOWN") + 18,
+        }
+        for col, wdt in widths.items():
             hh.setSectionResizeMode(col, QHeaderView.Fixed)
             self._table.setColumnWidth(col, wdt)
+        # Разделительная полоса под строкой-итогом.
+        self._table.setItemDelegate(_HeaderRuleDelegate(styles.BORDER_LT, self._table))
         # Колонка кнопки удаления — тоже фиксированная (cell-виджет без данных).
         hh.setSectionResizeMode(6, QHeaderView.Fixed)
         self._table.setColumnWidth(6, 44)
-        # Цвета заголовков задаём через item (QSS секции цвет не задаёт), чтобы
-        # заголовок Sponge был янтарным — как цифры в столбце, остальные — dim.
+        # Цвета заголовков задаём через item (QSS секции цвет не задаёт):
+        # Fleet — фиолетовый, Sponge — янтарный, остальные — dim.
+        header_colors = {2: styles.PURPLE, 3: styles.AMBER}
         for c in range(self._table.columnCount()):
             item = self._table.horizontalHeaderItem(c)
             if item is not None:
-                item.setForeground(QColor(styles.AMBER if c == 3 else styles.TEXT_DIM))
+                item.setForeground(QColor(header_colors.get(c, styles.TEXT_DIM)))
         return self._table
 
     # ── Действия ────────────────────────────────────────────────────────────────
@@ -331,6 +500,17 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText("\n".join(lines))
         self.statusBar().showMessage("Copied to clipboard", 3000)
 
+    def _on_clear(self):
+        """Полностью очищает список флота (с подтверждением)."""
+        if not self._members:
+            return
+        ans = QMessageBox.question(
+            self, "Clear fleet", "Remove all pilots from the fleet?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ans == QMessageBox.Yes:
+            self._members = []
+            self._refresh()
+
     def _set_sort(self, mode: str):
         self._sort_mode = mode
         self._update_time_label()
@@ -355,6 +535,8 @@ class MainWindow(QMainWindow):
         QApplication.instance().setStyleSheet(qss)
         config.set_value("theme", theme_id)
         self._set_brand_html()   # ссылка перенимает accent новой темы
+        self._bar.set_fill(styles.ACCENT)
+        self._bar.set_snake(theme_id == "uroborus")
         self._refresh()
 
     def _on_fleet_size(self, _index: int):
@@ -382,6 +564,12 @@ class MainWindow(QMainWindow):
             m.current_chars = self._targets.get(member_id, 0) if checked else 0
         self._refresh()
 
+    def _on_confirm_all(self):
+        """Главная галочка: ТОЛЬКО подтверждает выбор у всех (Сейчас = цель)."""
+        for m in self._members:
+            m.current_chars = self._targets.get(m.id, 0)
+        self._refresh()
+
     # ── Рендер ───────────────────────────────────────────────────────────────────
     def _refresh(self):
         ordered = sort_members(self._members, self._sort_mode)
@@ -395,10 +583,8 @@ class MainWindow(QMainWindow):
         # Сводка: занятые слоты (реальные окна + плюшки) / лимит, красное при превышении
         self._lbl_total.setText(str(fleet_used))
         self._lbl_total.setStyleSheet(f"font-size:22px; font-weight:bold; color:{color};")
+        self._bar.set_over(over)
         self._bar.setValue(min(fleet_used, self._fleet_limit))
-        self._bar.setStyleSheet(
-            "QProgressBar::chunk { background: %s; border-radius:2px; }" % color
-        )
 
         # Индикатор плюшек: свободные слоты / требование убрать лишние.
         capacity, sponge_total, free = self._sponge_metrics(result)
@@ -425,9 +611,34 @@ class MainWindow(QMainWindow):
         # Имена, встречающиеся более одного раза (без учёта регистра) — дубликаты.
         name_counts = Counter(m.name.casefold() for m in self._members)
 
-        # Таблица
-        self._table.setRowCount(len(ordered))
-        for row, m in enumerate(ordered):
+        # Таблица: строка-итог (шапка) сверху + строки пилотов.
+        total_windows = sum(m.max_chars for m in self._members)
+        char_count = len(self._members)
+        # Есть ли неподтверждённые изменения (Сейчас ≠ цель). Мастер-галочка видна
+        # только когда есть что подтверждать; без изменений — её нет.
+        pending = any(m.current_chars != self._targets.get(m.id, 0) for m in ordered)
+
+        self._table.setRowCount(len(ordered) + 1)
+        # Character → число персонажей, Max → суммарное число окон.
+        self._table.setItem(0, 0, self._cell(f"{char_count} chars", styles.ACCENT,
+                                             Qt.AlignLeft | Qt.AlignVCenter, bold=True,
+                                             bg=styles.BG_HEADER))
+        self._table.setItem(0, 1, self._cell(str(total_windows), styles.ACCENT,
+                                             Qt.AlignCenter, bold=True, bg=styles.BG_HEADER))
+        for c in (2, 3, 4, 6):
+            self._table.setItem(0, c, self._cell("", styles.TEXT, Qt.AlignCenter,
+                                                 bg=styles.BG_HEADER))
+        # Главная галочка только подтверждает; показываем лишь при наличии изменений.
+        self._table.removeCellWidget(0, 5)
+        if pending:
+            self._table.setCellWidget(0, 5, self._make_master_check())
+        else:
+            self._table.setItem(0, 5, self._cell("", styles.TEXT, Qt.AlignCenter,
+                                                 bg=styles.BG_HEADER))
+        self._table.setRowHeight(0, 32)
+
+        for i, m in enumerate(ordered):
+            row = i + 1
             target = result.assigned.get(m.id, 0)
             delta = target - m.current_chars
 
@@ -574,6 +785,18 @@ class MainWindow(QMainWindow):
         lay.addWidget(btn)
         return cont
 
+    def _make_master_check(self) -> QWidget:
+        """Главная галочка в строке-итоге — подтверждает изменения у всех пилотов."""
+        cont = QWidget()
+        lay = QHBoxLayout(cont)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setAlignment(Qt.AlignCenter)
+        cb = QCheckBox()
+        cb.setToolTip("Confirm changes for all pilots at once")
+        cb.clicked.connect(lambda _c: self._on_confirm_all())
+        lay.addWidget(cb)
+        return cont
+
     def _make_check(self, member_id: str, checked: bool) -> QWidget:
         cont = QWidget()
         lay = QHBoxLayout(cont)
@@ -587,7 +810,8 @@ class MainWindow(QMainWindow):
         return cont
 
     @staticmethod
-    def _cell(text: str, color: str, align, bold: bool = False) -> QTableWidgetItem:
+    def _cell(text: str, color: str, align, bold: bool = False,
+              bg: str | None = None) -> QTableWidgetItem:
         item = QTableWidgetItem(text)
         item.setForeground(QColor(color))
         item.setTextAlignment(align)
@@ -595,4 +819,6 @@ class MainWindow(QMainWindow):
             f = item.font()
             f.setBold(True)
             item.setFont(f)
+        if bg:
+            item.setBackground(QColor(bg))
         return item
