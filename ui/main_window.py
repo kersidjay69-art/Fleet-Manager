@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QLabel, QLineEdit, QPushButton, QButtonGroup, QComboBox,
-    QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
+    QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QSizePolicy, QMessageBox, QApplication, QStyledItemDelegate,
 )
 from PySide6.QtGui import (
@@ -338,9 +338,18 @@ class MainWindow(QMainWindow):
         btn.setFixedWidth(78)
         btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
+        # «Copied to clipboard» (бывшая CHECK) — справа от ADD; того же вида/высоты,
+        # что и ADD (стиль primary, expanding по высоте).
+        self._btn_check = QPushButton("Copied to clipboard")
+        self._btn_check.setObjectName("primary")
+        self._btn_check.setToolTip("Copy fleet assignments to clipboard")
+        self._btn_check.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self._btn_check.clicked.connect(self._on_check)
+
         lay.addWidget(self._inp_name)
         lay.addWidget(self._inp_max)
         lay.addWidget(btn)
+        lay.addWidget(self._btn_check)
         lay.addStretch(1)
         return panel
 
@@ -373,20 +382,20 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._btn_time)
         self._update_time_label()
 
-        # CHECK: копирует в буфер «имя — окон во флоте (+ плюшки)».
-        self._btn_check = QPushButton("CHECK")
-        self._btn_check.setObjectName("seg")
-        self._btn_check.setToolTip("Copy fleet assignments to clipboard")
-        self._btn_check.clicked.connect(self._on_check)
-        lay.addSpacing(10)
-        lay.addWidget(self._btn_check)
-
-        # CHECK очищает весь список флота (с подтверждением).
+        # Clear очищает весь список флота (с подтверждением).
         self._btn_clear = QPushButton("Clear")
         self._btn_clear.setObjectName("danger")
         self._btn_clear.setToolTip("Remove all pilots from the fleet")
         self._btn_clear.clicked.connect(self._on_clear)
+        lay.addSpacing(10)
         lay.addWidget(self._btn_clear)
+
+        # Assign — применяет UP/DOWN (Сейчас = цель) у всех активных; рядом с Clear.
+        self._btn_assign = QPushButton("Assign")
+        self._btn_assign.setObjectName("assign")
+        self._btn_assign.setToolTip("Apply UP/DOWN to all active pilots")
+        self._btn_assign.clicked.connect(lambda: self._on_confirm_all())
+        lay.addWidget(self._btn_assign)
 
         lay.addStretch(1)
         return lay
@@ -394,7 +403,7 @@ class MainWindow(QMainWindow):
     def _build_table(self) -> QWidget:
         self._table = QTableWidget(0, 7)
         self._table.setHorizontalHeaderLabels(
-            ["Character", "Max", "Fleet", "Sponge", "UP/DOWN", "✓", ""]
+            ["Character", "Max", "Fleet", "Sponge", "UP/DOWN", "AFK", ""]
         )
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -404,8 +413,6 @@ class MainWindow(QMainWindow):
 
         hh = self._table.horizontalHeader()
         hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        # ✓ — по содержимому.
-        hh.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         # Степперы Max/Sponge — фиксированная ширина под кнопки. In Fleet и UP/DOWN
         # сужаем РОВНО до их заголовков: ширину текста меряем реальным шрифтом
         # заголовка (Segoe UI 11px bold) в рантайме, так что на любой машине текст
@@ -416,11 +423,13 @@ class MainWindow(QMainWindow):
         hfm = QFontMetrics(hfont)
         # Max/Sponge: ширина под степпер [−] число [+] (≈82px) + небольшой запас,
         # чтобы кнопки не обрезались. In Fleet/UP-DOWN — ровно по их заголовкам.
+        # AFK — фикс ширина под красную кнопку.
         widths = {
             1: 88,
             2: hfm.horizontalAdvance("Fleet") + 18,
             3: 88,
             4: hfm.horizontalAdvance("UP/DOWN") + 18,
+            5: 58,
         }
         for col, wdt in widths.items():
             hh.setSectionResizeMode(col, QHeaderView.Fixed)
@@ -431,8 +440,8 @@ class MainWindow(QMainWindow):
         hh.setSectionResizeMode(6, QHeaderView.Fixed)
         self._table.setColumnWidth(6, 44)
         # Цвета заголовков задаём через item (QSS секции цвет не задаёт):
-        # Fleet — фиолетовый, Sponge — янтарный, остальные — dim.
-        header_colors = {2: styles.PURPLE, 3: styles.AMBER}
+        # Fleet — фиолетовый, Sponge — янтарный, AFK — красный, остальные — dim.
+        header_colors = {2: styles.PURPLE, 3: styles.AMBER, 5: styles.RED}
         for c in range(self._table.columnCount()):
             item = self._table.horizontalHeaderItem(c)
             if item is not None:
@@ -452,7 +461,7 @@ class MainWindow(QMainWindow):
             name=name,
             max_chars=max_chars,
             created_at=time.time(),
-            current_chars=0,
+            current_chars=max_chars,   # пилот заходит со ВСЕМИ своими окнами
         ))
         self._inp_name.clear()
         self._inp_name.setFocus()
@@ -478,6 +487,7 @@ class MainWindow(QMainWindow):
                     created_at=float(d.get("created_at", time.time())),
                     current_chars=int(d.get("current_chars", 0)),
                     sponge=int(d.get("sponge", 0)),
+                    afk=bool(d.get("afk", False)),
                 ))
             except (KeyError, ValueError, TypeError):
                 continue
@@ -489,7 +499,7 @@ class MainWindow(QMainWindow):
         data = [
             {"id": m.id, "name": m.name, "max_chars": m.max_chars,
              "created_at": m.created_at, "current_chars": m.current_chars,
-             "sponge": m.sponge}
+             "sponge": m.sponge, "afk": m.afk}
             for m in self._members
         ]
         if data == self._fleet_cache_sig:
@@ -567,31 +577,40 @@ class MainWindow(QMainWindow):
         config.save_window_geometry(self)
         super().closeEvent(event)
 
-    def _on_confirm(self, member_id: str, checked: bool):
-        """Командир подтвердил/снял подтверждение, что пилот изменил число окон.
-        Подтверждение → факт «Сейчас» приравнивается к цели «Надо»; снятие → 0."""
-        m = self._member(member_id)
-        if m is not None:
-            m.current_chars = self._targets.get(member_id, 0) if checked else 0
+    def _on_confirm_all(self):
+        """Главная галочка: подтверждает выбор у всех АКТИВНЫХ (Сейчас = цель)."""
+        for m in self._members:
+            if not m.afk:
+                m.current_chars = self._targets.get(m.id, 0)
         self._refresh()
 
-    def _on_confirm_all(self):
-        """Главная галочка: ТОЛЬКО подтверждает выбор у всех (Сейчас = цель)."""
-        for m in self._members:
-            m.current_chars = self._targets.get(m.id, 0)
+    def _toggle_afk(self, member_id: str):
+        """AFK on/off: вне счёта и в конец списка / обратно."""
+        m = self._member(member_id)
+        if m is not None:
+            m.afk = not m.afk
+            # AFK — окон во флоте нет; возврат — снова со всеми окнами.
+            m.current_chars = 0 if m.afk else m.max_chars
         self._refresh()
 
     # ── Рендер ───────────────────────────────────────────────────────────────────
     def _refresh(self):
         ordered = sort_members(self._members, self._sort_mode)
-        result = compute_distribution(ordered, fleet_limit=self._fleet_limit)
+        active = [m for m in ordered if not m.afk]
+        display = ordered                 # порядок не меняется (AFK остаётся на месте)
+
+        # Распределение и подсчёт — ТОЛЬКО по активным (AFK вне раздачи).
+        result = compute_distribution(active, fleet_limit=self._fleet_limit)
         self._targets = dict(result.assigned)
 
-        fleet_used = self._fleet_used()   # реальные окна + плюшки занимают слоты
+        # Шапка FLEET = сколько окон пилоты держат СЕЙЧАС (current, без AFK). До
+        # «принять» каждый держит все свои окна (current=max) → показывает суммарный
+        # спрос (может быть > лимита, красным). «Принять» ставит current = цель
+        # раздачи → показывает распределённое число.
+        fleet_used = sum(m.current_chars + m.sponge for m in active)
         over = fleet_used > self._fleet_limit
         color = styles.RED if over else styles.ACCENT
 
-        # Сводка: занятые слоты (реальные окна + плюшки) / лимит, красное при превышении
         self._lbl_total.setText(str(fleet_used))
         self._lbl_total.setStyleSheet(f"font-size:22px; font-weight:bold; color:{color};")
         self._bar.set_over(over)
@@ -615,86 +634,87 @@ class MainWindow(QMainWindow):
         # Это только подсказка ФК — авто-изменение плюшек не делаем.
         sponge_keep = compute_distribution(
             [Member(id=m.id, name=m.name, max_chars=m.sponge, created_at=m.created_at)
-             for m in ordered],
+             for m in active],
             fleet_limit=capacity,
         ).assigned
 
         # Имена, встречающиеся более одного раза (без учёта регистра) — дубликаты.
         name_counts = Counter(m.name.casefold() for m in self._members)
 
-        # Таблица: строка-итог (шапка) сверху + строки пилотов.
-        total_windows = sum(m.max_chars for m in self._members)
-        char_count = len(self._members)
-        # Есть ли неподтверждённые изменения (Сейчас ≠ цель). Мастер-галочка видна
-        # только когда есть что подтверждать; без изменений — её нет.
-        pending = any(m.current_chars != self._targets.get(m.id, 0) for m in ordered)
+        # Таблица: строка-итог (по активным) + активные пилоты, затем AFK внизу.
+        total_windows = sum(m.max_chars for m in active)
+        char_count = len(active)
+        # Есть ли неподтверждённые изменения (Сейчас ≠ цель) у активных.
+        pending = any(m.current_chars != self._targets.get(m.id, 0) for m in active)
 
-        self._table.setRowCount(len(ordered) + 1)
+        self._table.setRowCount(len(display) + 1)
         # Character → число персонажей, Max → суммарное число окон.
         self._table.setItem(0, 0, self._cell(f"{char_count} chars", styles.ACCENT,
                                              Qt.AlignLeft | Qt.AlignVCenter, bold=True,
                                              bg=styles.BG_HEADER))
         self._table.setItem(0, 1, self._cell(str(total_windows), styles.ACCENT,
                                              Qt.AlignCenter, bold=True, bg=styles.BG_HEADER))
-        for c in (2, 3, 4, 6):
+        for c in (2, 3, 4, 5, 6):
             self._table.setItem(0, c, self._cell("", styles.TEXT, Qt.AlignCenter,
                                                  bg=styles.BG_HEADER))
-        # Главная галочка только подтверждает; показываем лишь при наличии изменений.
-        self._table.removeCellWidget(0, 5)
-        if pending:
-            self._table.setCellWidget(0, 5, self._make_master_check())
-        else:
-            self._table.setItem(0, 5, self._cell("", styles.TEXT, Qt.AlignCenter,
-                                                 bg=styles.BG_HEADER))
+        self._table.removeCellWidget(0, 4)   # на случай старого виджета мастер-галочки
         self._table.setRowHeight(0, 32)
+        # Кнопка Assign активна только когда есть что применять.
+        self._btn_assign.setEnabled(pending)
 
-        for i, m in enumerate(ordered):
+        for i, m in enumerate(display):
             row = i + 1
+            dim = m.afk
             target = result.assigned.get(m.id, 0)
             delta = target - m.current_chars
 
             is_dup = name_counts[m.name.casefold()] > 1
             name_text = f"⚠ {m.name}" if is_dup else m.name
-            name_item = self._cell(name_text, styles.RED if is_dup else styles.TEXT,
-                                   Qt.AlignLeft | Qt.AlignVCenter)
-            if is_dup:
+            name_col = styles.TEXT_DIM if dim else (styles.RED if is_dup else styles.TEXT)
+            name_item = self._cell(name_text, name_col, Qt.AlignLeft | Qt.AlignVCenter)
+            if dim:
+                name_item.setToolTip("AFK — excluded from the count")
+            elif is_dup:
                 name_item.setToolTip("Duplicate name — pilot added twice")
             self._table.setItem(row, 0, name_item)
 
-            # Max со степпером −/+ (исправление ошибки ввода командиром).
+            # Max со степпером −/+; для AFK кнопки неактивны (серые).
             self._table.setCellWidget(row, 1, self._make_stepper(
                 m.max_chars, styles.TEXT_DIM,
                 on_minus=lambda mid=m.id: self._adjust_max(mid, -1),
                 on_plus=lambda mid=m.id: self._adjust_max(mid, +1),
-                minus_enabled=m.max_chars > 1, plus_enabled=m.max_chars < 99))
+                minus_enabled=(not dim) and m.max_chars > 1,
+                plus_enabled=(not dim) and m.max_chars < 99))
 
-            # In Fleet — жирным.
+            # Fleet (текущие окна) — жирным; для AFK приглушённо.
             self._table.setItem(row, 2, self._cell(
-                str(m.current_chars), styles.TEXT, Qt.AlignCenter, bold=True))
+                str(m.current_chars), styles.TEXT_DIM if dim else styles.TEXT,
+                Qt.AlignCenter, bold=True))
 
-            # Sponge («плюшки») со степпером −/+; − выключен при 0,
-            # + блокируется при заполненном флоте (ошибка в _adjust_sponge).
+            # Sponge со степпером −/+; для AFK кнопки неактивны (серые), число серое.
             self._table.setCellWidget(row, 3, self._make_stepper(
-                m.sponge, styles.AMBER,
+                m.sponge, styles.TEXT_DIM if dim else styles.AMBER,
                 on_minus=lambda mid=m.id: self._adjust_sponge(mid, -1),
                 on_plus=lambda mid=m.id: self._adjust_sponge(mid, +1),
-                minus_enabled=m.sponge > 0, plus_enabled=True))
+                minus_enabled=(not dim) and m.sponge > 0, plus_enabled=not dim))
 
-            # UP/DOWN: команда по обычным персонажам (+ добавить / − убрать) и,
-            # отдельным янтарным числом, сколько убрать плюшек у пилота.
-            if delta > 0:
-                cmd_text, cmd_color = f"+{delta}", styles.GREEN
-            elif delta < 0:
-                cmd_text, cmd_color = f"−{abs(delta)}", styles.RED
+            # UP/DOWN: для AFK — прочерк (вне раздачи); иначе команда + плюшки.
+            if dim:
+                cmd_text, cmd_color, sponge_remove = "—", styles.TEXT_DIM, 0
             else:
-                cmd_text, cmd_color = "—", styles.TEXT_DIM
-            sponge_remove = m.sponge - sponge_keep.get(m.id, 0)
+                if delta > 0:
+                    cmd_text, cmd_color = f"+{delta}", styles.GREEN
+                elif delta < 0:
+                    cmd_text, cmd_color = f"−{abs(delta)}", styles.RED
+                else:
+                    cmd_text, cmd_color = "—", styles.TEXT_DIM
+                sponge_remove = m.sponge - sponge_keep.get(m.id, 0)
             self._table.setCellWidget(row, 4, self._make_updown(cmd_text, cmd_color, sponge_remove))
 
-            # Чекбокс подтверждения (отмечен, когда «In Fleet» == цель)
-            self._table.setCellWidget(row, 5, self._make_check(m.id, delta == 0 and target > 0))
+            # AFK-кнопка (красная) вместо галочки подтверждения.
+            self._table.setCellWidget(row, 5, self._make_afk(m.id, m.afk))
 
-            # Кнопка удаления пилота из флота
+            # Кнопка удаления пилота из флота.
             self._table.setCellWidget(row, 6, self._make_delete(m.id, m.name))
 
             self._table.setRowHeight(row, 38)
@@ -703,10 +723,6 @@ class MainWindow(QMainWindow):
         self._persist_fleet()
 
     # ── Слоты / плюшки ───────────────────────────────────────────────────────────
-    def _fleet_used(self) -> int:
-        """Занятые слоты флота: реальные окна + плюшки."""
-        return sum(m.current_chars + m.sponge for m in self._members)
-
     def _adjust_max(self, member_id: str, delta: int):
         m = self._member(member_id)
         if m is not None:
@@ -720,7 +736,7 @@ class MainWindow(QMainWindow):
         НЕ нужно). free = capacity − уже выставленные плюшки (может быть < 0,
         если игрокам не хватает мест — плюшки надо убирать).
         """
-        sponge_total = sum(m.sponge for m in self._members)
+        sponge_total = sum(m.sponge for m in self._members if not m.afk)
         capacity = max(0, self._fleet_limit - result.total_assigned)
         return capacity, sponge_total, capacity - sponge_total
 
@@ -796,28 +812,22 @@ class MainWindow(QMainWindow):
         lay.addWidget(btn)
         return cont
 
-    def _make_master_check(self) -> QWidget:
-        """Главная галочка в строке-итоге — подтверждает изменения у всех пилотов."""
+    def _make_afk(self, member_id: str, is_afk: bool) -> QWidget:
+        """Красная кнопка-тогл AFK: выключает пилота из счёта (позиция не меняется)."""
         cont = QWidget()
         lay = QHBoxLayout(cont)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setAlignment(Qt.AlignCenter)
-        cb = QCheckBox()
-        cb.setToolTip("Confirm changes for all pilots at once")
-        cb.clicked.connect(lambda _c: self._on_confirm_all())
-        lay.addWidget(cb)
-        return cont
-
-    def _make_check(self, member_id: str, checked: bool) -> QWidget:
-        cont = QWidget()
-        lay = QHBoxLayout(cont)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setAlignment(Qt.AlignCenter)
-        cb = QCheckBox()
-        cb.setChecked(checked)
-        cb.setToolTip("Confirm the pilot changed their window count")
-        cb.clicked.connect(lambda c, mid=member_id: self._on_confirm(mid, c))
-        lay.addWidget(cb)
+        # Высота фиксированная, ширина растягивается на ячейку за вычетом отступов —
+        # кнопка всегда помещается, рамку не режет.
+        lay.setContentsMargins(6, 4, 6, 4)
+        btn = QPushButton("AFK")
+        btn.setObjectName("afk")
+        btn.setCheckable(True)
+        btn.setChecked(is_afk)
+        btn.setFixedHeight(22)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setToolTip("AFK — exclude from the count and move to the bottom")
+        btn.clicked.connect(lambda _c, mid=member_id: self._toggle_afk(mid))
+        lay.addWidget(btn)
         return cont
 
     @staticmethod

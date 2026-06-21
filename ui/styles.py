@@ -158,6 +158,32 @@ QPushButton#danger {{
 QPushButton#danger:hover {{ background: rgba(239, 83, 80, 0.18); }}
 QPushButton#danger:pressed {{ background: rgba(239, 83, 80, 0.30); }}
 
+/* Assign — акцентная, но того же размера, что соседние кнопки (seg/Clear). */
+QPushButton#assign {{
+    background: {PRIMARY_BG};
+    color: {ACCENT};
+    border: 1px solid {ACCENT};
+    border-radius: 3px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: bold;
+}}
+QPushButton#assign:hover {{ background: {PRIMARY_BG_HOVER}; }}
+QPushButton#assign:disabled {{ color: {BORDER}; border-color: {BORDER}; background: {BG_DEEP}; }}
+
+/* AFK-тогл: серый по умолчанию; красный, когда включён. */
+QPushButton#afk {{
+    background: transparent;
+    color: {TEXT_DIM};
+    border: 1px solid {TEXT_DIM};
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 0;
+}}
+QPushButton#afk:hover {{ color: {TEXT}; border-color: {TEXT}; }}
+QPushButton#afk:checked {{ background: {RED}; color: #2a0a0a; border-color: {RED}; }}
+
 QPushButton#stepMinus, QPushButton#stepPlus {{
     background: {BG_PANEL};
     border-radius: 3px;
